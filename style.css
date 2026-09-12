@@ -209,7 +209,8 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); o
 
 /* ---------- Mobile ---------- */
 @media (max-width: 720px) {
-  :root { --board: min(94vw, 52vh); }
+  :root { --board: min(100vw - 2rem, 52vh); }
+  .page { padding-left: 1rem; padding-right: 1rem; }
   .play { grid-template-columns: 1fr; justify-items: center; }
   .sidebar { border-left: 0; padding-left: 0; width: var(--board); gap: .9rem; }
   .pad { grid-template-columns: repeat(9, 1fr); gap: .25rem; }
