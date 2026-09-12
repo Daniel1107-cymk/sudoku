@@ -99,7 +99,7 @@ function newGame(difficulty, daily) {
     number: hashStr(seedStr) % 9000 + 1000,
     cells: puzzle.map((v) => ({ value: v, notes: [] })),
     selected: null, notesMode: false, history: [], future: [],
-    mistakes: 0, seconds: 0, paused: false, won: false,
+    mistakes: 0, seconds: 0, paused: false, won: false, hint: null,
   };
   startTimer();
   render();
@@ -120,6 +120,7 @@ function setDigit(d) {
   const i = state.selected;
   if (i === null || state.puzzle[i] || state.paused || state.won) return;
   const cell = state.cells[i];
+  state.hint = null;
   pushHistory();
   if (state.notesMode) {
     if (cell.value) cell.value = 0;
@@ -144,31 +145,93 @@ function erase() {
   if (i === null || state.puzzle[i] || state.paused || state.won) return;
   const cell = state.cells[i];
   if (!cell.value && !cell.notes.length) return;
+  state.hint = null;
   pushHistory();
   cell.value = 0; cell.notes = [];
   afterMove();
 }
 
+// ---------- Hints ----------
+const UNITS = [];
+for (let k = 0; k < 9; k++) {
+  UNITS.push({ name: 'row', cells: Array.from({ length: 9 }, (_, c) => k * 9 + c) });
+  UNITS.push({ name: 'column', cells: Array.from({ length: 9 }, (_, r) => r * 9 + k) });
+  const br = Math.floor(k / 3) * 3, bc = (k % 3) * 3;
+  UNITS.push({ name: 'box', cells: Array.from({ length: 9 }, (_, j) => (br + Math.floor(j / 3)) * 9 + bc + j % 3) });
+}
+const rc = (i) => `row ${Math.floor(i / 9) + 1}, column ${i % 9 + 1}`;
+const bold = (d) => `<b>${d}</b>`;
+
+// ponytail: singles only (naked + hidden); harder positions fall back to revealing the answer
+function findHint() {
+  const grid = state.cells.map((c) => c.value);
+  // 1. mistake first
+  for (let i = 0; i < 81; i++) {
+    if (!state.puzzle[i] && grid[i] && grid[i] !== state.solution[i]) {
+      const clash = PEERS[i].find((p) => grid[p] === grid[i]);
+      return { cell: i, digit: 0, kind: 'mistake', highlight: clash !== undefined ? [clash] : [],
+        text: `The ${bold(grid[i])} in ${rc(i)} is wrong${clash !== undefined ? ` — there is already a ${bold(grid[i])} in ${rc(clash)}` : ''}. Erase it first.` };
+    }
+  }
+  // 2. naked single
+  for (let i = 0; i < 81; i++) {
+    if (grid[i]) continue;
+    const c = candidates(grid, i);
+    if (c.length !== 1) continue;
+    const seen = {};
+    for (const p of PEERS[i]) if (grid[p] && !seen[grid[p]]) seen[grid[p]] = p;
+    const used = Object.keys(seen).join(' ');
+    return { cell: i, digit: c[0], kind: 'naked', highlight: Object.values(seen), cands: c,
+      text: `Only ${bold(c[0])} fits in ${rc(i)}. Its row, column and box already contain ${used}, leaving just one choice.` };
+  }
+  // 3. hidden single
+  for (const u of UNITS) {
+    for (let d = 1; d <= 9; d++) {
+      if (u.cells.some((i) => grid[i] === d)) continue;
+      const spots = u.cells.filter((i) => !grid[i] && candidates(grid, i).includes(d));
+      if (spots.length !== 1) continue;
+      const i = spots[0], others = u.cells.filter((j) => !grid[j] && j !== i);
+      return { cell: i, digit: d, kind: 'hidden', highlight: others, cands: candidates(grid, i),
+        text: `${bold(d)} must go in ${rc(i)}. It is the only empty cell in this ${u.name} that can still take a ${d} — every other empty cell here already sees a ${d}.` };
+    }
+  }
+  // 4. fallback
+  const empty = grid.map((v, i) => v ? -1 : i).filter((i) => i >= 0);
+  if (!empty.length) return null;
+  const i = empty[Math.floor(Math.random() * empty.length)];
+  return { cell: i, digit: state.solution[i], kind: 'reveal', highlight: [], cands: candidates(grid, i),
+    text: `No single stands out right now — this needs a deeper technique (pairs, pointing, X-wing…). The answer for ${rc(i)} is ${bold(state.solution[i])}.` };
+}
+
 function hint() {
   if (state.paused || state.won) return;
-  const wrong = [];
-  state.cells.forEach((c, i) => { if (!state.puzzle[i] && c.value !== state.solution[i]) wrong.push(i); });
-  if (!wrong.length) return;
-  const i = state.selected !== null && wrong.includes(state.selected) ? state.selected : wrong[Math.floor(Math.random() * wrong.length)];
-  pushHistory();
-  state.cells[i] = { value: state.solution[i], notes: [] };
-  state.selected = i;
-  afterMove(i);
+  if (state.hint) {
+    const h = state.hint, i = h.cell;
+    state.hint = null;
+    pushHistory();
+    state.cells[i] = { value: h.digit, notes: [] };
+    if (h.digit) for (const p of PEERS[i]) {
+      const n = state.cells[p].notes, k = n.indexOf(h.digit);
+      if (k >= 0) n.splice(k, 1);
+    }
+    state.selected = i;
+    return afterMove(i);
+  }
+  state.hint = findHint();
+  if (state.hint) state.selected = state.hint.cell;
+  render();
 }
 
 function undo() {
   if (!state.history.length) return;
+  state.hint = null;
   state.future.push(snapshot());
   state.cells = JSON.parse(state.history.pop());
   render(); save();
 }
 function redo() {
   if (!state.future.length) return;
+  state.hint = null;
   state.history.push(snapshot());
   state.cells = JSON.parse(state.future.pop());
   render(); save();
@@ -216,7 +279,7 @@ function buildBoard() {
     b.className = 'cell';
     b.style.setProperty('--i', i);
     b.dataset.i = i;
-    b.addEventListener('click', () => { state.selected = i; render(); });
+    b.addEventListener('click', () => { state.selected = i; state.hint = null; render(); });
     board.appendChild(b);
     cellEls.push(b);
   }
@@ -237,9 +300,13 @@ function render(popIndex) {
     el.classList.toggle('wrong', !!c.value && c.value !== state.solution[i]);
     el.classList.remove('pop');
     if (i === popIndex) { void el.offsetWidth; el.classList.add('pop'); }
+    const h = state.hint;
+    el.classList.toggle('hint-target', !!h && h.cell === i);
+    el.classList.toggle('hint-peer', !!h && h.highlight.includes(i));
+    const notes = h && h.cell === i && !c.value && h.cands ? h.cands : c.notes;
     if (c.value) el.textContent = c.value;
-    else if (c.notes.length) {
-      el.innerHTML = '<span class="notes">' + [1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => `<i>${c.notes.includes(d) ? d : ''}</i>`).join('') + '</span>';
+    else if (notes.length) {
+      el.innerHTML = '<span class="notes">' + [1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => `<i>${notes.includes(d) ? d : ''}</i>`).join('') + '</span>';
     } else el.textContent = '';
     el.setAttribute('aria-label', `row ${r + 1} column ${col + 1}${c.value ? ', ' + c.value : c.notes.length ? ', notes ' + c.notes.join(' ') : ', empty'}${given ? ', given' : ''}`);
     el.setAttribute('aria-pressed', i === sel);
@@ -254,6 +321,9 @@ function render(popIndex) {
   $('#undo').disabled = !state.history.length;
   $('#redo').disabled = !state.future.length;
   $('#mistakes').textContent = state.mistakes;
+  $('#hint').textContent = state.hint ? (state.hint.digit ? 'Fill it in' : 'Erase it') : 'Hint';
+  $('#hint-text').hidden = !state.hint;
+  $('#hint-text').innerHTML = state.hint ? state.hint.text : '';
   $('#pause').textContent = state.paused ? 'Resume' : 'Pause';
   $('#difficulty').value = state.difficulty;
   $('#folio').textContent = `No. ${state.number.toLocaleString()} · ${state.daily ? 'Daily · ' : ''}${new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · ${state.difficulty[0].toUpperCase() + state.difficulty.slice(1)}`;
@@ -329,6 +399,19 @@ function selfTest() {
     const g = puzzle.slice(); solve(g, null, 1);
     console.assert(g.join('') === solution.join(''), name + ': solves to solution');
   }
+  // hints: every hint on fresh puzzles must agree with the solution
+  const savedState = state;
+  for (let k = 0; k < 20; k++) {
+    const g = generate(k < 10 ? 40 : 22, mulberry32(k));
+    state = { puzzle: g.puzzle, solution: g.solution, cells: g.puzzle.map((v) => ({ value: v, notes: [] })) };
+    const h = findHint();
+    console.assert(h && h.digit === g.solution[h.cell], 'hint digit matches solution #' + k);
+    console.assert(h.kind === 'reveal' || h.text.includes('<b>' + h.digit + '</b>'), 'hint text names digit #' + k);
+    if (k < 10) console.assert(h.kind !== 'reveal', 'easy puzzle has a single #' + k);
+    state.cells[h.cell].value = h.digit === 1 ? 2 : 1; // plant a mistake
+    console.assert(findHint().kind === 'mistake', 'mistake detected #' + k);
+  }
+  state = savedState;
   const a = generate(32, mulberry32(hashStr('2026-09-12'))).puzzle.join('');
   const b = generate(32, mulberry32(hashStr('2026-09-12'))).puzzle.join('');
   console.assert(a === b, 'daily deterministic');
