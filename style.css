@@ -80,8 +80,9 @@ body {
 .board-wrap { position: relative; width: var(--board); }
 .board {
   display: grid;
-  grid-template-columns: repeat(9, 1fr);
-  width: var(--board); aspect-ratio: 1;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  grid-template-rows: repeat(9, minmax(0, 1fr));
+  width: var(--board); height: var(--board);
   border: 3px solid var(--ink);
   background: var(--paper);
   box-shadow: 8px 10px 0 -2px var(--paper-deep);
@@ -91,6 +92,7 @@ body {
   all: unset;
   position: relative;
   display: grid; place-items: center;
+  min-width: 0; min-height: 0; overflow: hidden; line-height: 1;
   font-family: var(--text);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
@@ -118,6 +120,7 @@ body {
 .cell.hint-target { box-shadow: inset 0 0 0 2px var(--accent); outline: 2px dashed var(--accent); outline-offset: -5px; }
 .cell.hint-peer { background: rgba(200,50,30,.09); }
 .cell.hint-peer.related { background: rgba(200,50,30,.12); }
+.cell.hint-key { background: rgba(43,58,103,.14); }
 .hint {
   margin: 0; padding: .25rem 0 .25rem .8rem;
   border-left: 3px solid var(--accent);
@@ -126,6 +129,11 @@ body {
   animation: rise .3s both;
 }
 .hint b { font-style: normal; font-weight: 900; color: var(--ink); }
+.hint p { margin: 0; }
+.hint p + p { margin-top: .35rem; }
+.hint ol { margin: 0 0 .4rem; padding-left: 1.1rem; }
+.hint li + li { margin-top: .25rem; }
+.hint em { font-style: normal; font-weight: 500; color: var(--pen); }
 .cell.pop { animation: pop .18s cubic-bezier(.2,.8,.3,1.4); }
 
 .notes {
